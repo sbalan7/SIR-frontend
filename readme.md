@@ -1,5 +1,11 @@
 # GREGOR Data Analysis and SIR Frontend Testing
 
+SIR Frontend v0.01
+
+TODO:
+1. Rewrite the functions into classes for a cleaner and more powerful library
+2. Add more support to plotting with matplotlib's API properly
+3. Add comments and clean up code
 
 To analyse data from GREGOR, first extract information from the `\level1` fits files using standard IO operations. Once the Stokes parameters are extracted from these files, the `\frontend` package can be used to analyse this information. It is necessary to have this folder in the root directory of where the other code will be run to avoid a `ModuleNotFound` error. A suggestion is to create a different folder within this directory to allow for an easy manipulation of the SIR input and output files.
 
