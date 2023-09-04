@@ -76,21 +76,22 @@ class Atmosphere:
             np.savetxt(f, self.atm0.reshape(1, 3), delimiter='    ', fmt='%.5f')
             np.savetxt(f, self.atm1, delimiter='    ', fmt=['%.3f','%.4f','%.6e','%.6e','%.4f','%.4e','%.4f','%.4f','%.6f','%.6e','%.9e'])
 
-    def plot_atmosphere(self, color, fig=None, axs=None):
+    def plot_atmosphere(self, fig=None, axs=None, **kwargs):
         if fig is None:
             fig, axs = plt.subplots(2, 3, figsize=(10, 6))
-        fig, axs = frontend.plot.add_atmosphere(self.atm1, color, fig, axs)
+        fig, axs = frontend.plot.add_atmosphere(self.atm1, fig, axs, **kwargs)
         return fig, axs
 
 class Profiles:
     """
     For manipulation of the Stokes profiles and their corresponding parameters.
     """
-    def __init__(self, path_to_obs, path_to_file):
-        [self.indices, self.lambdas, self.linei, self.lineq, self.lineu, self.linev] = np.loadtxt(path_to_obs).T
-
-        self.path_to_obs  = path_to_obs
+    def __init__(self, path_to_file):
+        [self.indices, self.lambdas, self.linei, self.lineq, self.lineu, self.linev] = np.loadtxt(path_to_file).T
         self.path_to_file = path_to_file
+
+    def modify_index(self, index):
+        self.indices = index * np.ones(len(self.indices))
 
     def add_profile(self, profile2):
         self.indices = np.concatenate(self.indices, profile2.indices)
@@ -100,93 +101,54 @@ class Profiles:
         self.lineq = np.concatenate(self.lineq, profile2.lineq)
         self.lineu = np.concatenate(self.lineu, profile2.lineu)
         self.linev = np.concatenate(self.linev, profile2.linev)
+    
+    def write_profile(self):
+        with open(self.path_to_file, 'wb') as f:
+            np.savetxt(f, np.transpose([self.indices, self.lambdas, self.linei, self.lineq, self.lineu, self.linev]), delimiter='    ',fmt=['%.1f','%.8f','%.8e','%.8e','%.8e','%.8e'])
+    
+    def plot_profiles(self, index, fig=None, axs=None, **kwargs):
+        if fig is None:
+            fig, axs = plt.subplots(2, 2)
+        data = [self.indices, self.lambdas, self.linei, self.lineq, self.lineu, self.linev]
+        line = data[:,np.where(data[0] == index)][:, 0, :]
+        fig, axs = frontend.plot.plot_spectra(line, fig, axs, **kwargs)
+        return fig, axs
+    
+    def write_wavelength_file(self, resolution, grid_path='malla.grid'):
+        data = [self.indices, self.lambdas, self.linei, self.lineq, self.lineu, self.linev]
+        idxs = np.unique(self.indices)
+        L = []
+
+        for idx in idxs:
+            line = data[:,np.where(data[0] == idx)][:, 0, :][1]
+            line = f"{int(idx):<10}:{line[0]:15.4f},{resolution:7.1f},{line[-1]:15.4f}\n"
+            L.append(line)
+
+        with open(grid_path, 'w') as f:
+            f.writelines(L)
+
+        [self.indices, self.lambdas, self.linei, self.lineq, self.lineu, self.linev] = data
+        pass
         
-        
+class SIR:
+    def __init__(self, atmosphere, profiles, trol_file, lines_file, **kwargs):
+        # save pwd
+        # find directory of trol file
+        # write atmos, prof, lines, malla in directory
+        # get any trol modifications
+        # run sir upon call (within this call move to trol directory and out of it also)
 
-def run_SIR(path, trol, suppress=True):
-    os.chdir(path)
-    if suppress:
-        os.system('echo ' + trol + ' | '+path_to_sir+' >/dev/null 2>&1')
-    else:
-        os.system('echo ' + trol + ' | '+path_to_sir)
-    os.chdir('..')
+        pass
 
-def set_const_atm(model, temp=None, pres=None, micr=None, magf=None, vlos=None, incl=None, azim=None):
-    atm0 = np.loadtxt(model, skiprows=0, max_rows=1)
-    atm1 = np.loadtxt(model, skiprows=1)
-
-    if temp is not None:
-        atm1[:, 1] = atm1[:, 1] * 0 + temp     # Temperature
-    
-    if pres is not None:
-        atm1[:, 2] = atm1[:, 2] * 0 + pres     # Pressure
-    
-    if micr is not None:
-        atm1[:, 3] = atm1[:, 3] * 0 + micr     # Microturbulence
-    
-    if magf is not None:
-        atm1[:, 4] = atm1[:, 4] * 0 + magf     # Mag Field
-    
-    if vlos is not None:
-        atm1[:, 5] = atm1[:, 5] * 0 + vlos     # LOS Velocity
-    
-    if incl is not None:
-        atm1[:, 6] = atm1[:, 6] * 0 + incl     # Inclination
-    
-    if azim is not None:
-        atm1[:, 7] = atm1[:, 7] * 0 + azim     # Azimuth
-
-    return atm0, atm1
-
-def set_complex_atm(model, macr, fill, strl, logt, temp, pres, micr, magf, vlos, incl, azim):
-    atm0 = np.loadtxt(model, skiprows=0, max_rows=1)
-    atm1 = np.loadtxt(model, skiprows=1)
-
-    atm0 = np.array([macr, fill, strl])
-
-    atm1[:, 0] = logt     # log_tau
-    atm1[:, 1] = temp     # Temperature
-    atm1[:, 2] = pres     # Pressure
-    atm1[:, 3] = micr     # Microturbulence
-    atm1[:, 4] = magf     # Mag Field
-    atm1[:, 5] = vlos     # LOS Velocity
-    atm1[:, 6] = incl     # Inclination
-    atm1[:, 7] = azim     # Azimuth
-
-    return atm0, atm1
-
-def write_atm(path, atm0, atm1):
-    with open(path, 'wb') as f:
-        np.savetxt(f, atm0.reshape(1, 3), delimiter='    ', fmt='%.5f')
-        np.savetxt(f, atm1, delimiter='    ', fmt=['%.3f','%.4f','%.6e','%.6e','%.4f','%.4e','%.4f','%.4f','%.6f','%.6e','%.9e'])
-
-def read_existing_profile(path):
-    # Returns in the form of [indices, lambdas, linei, lineq, lineu, linev]
-    return np.loadtxt(path).T
-
-def write_profile(path, index, lambdas, linei, lineq, lineu, linev, add=False):
-    if add:
-        with open(path, 'ab') as f:
-            np.savetxt(f, np.transpose([index*np.ones(len(lambdas)), lambdas, linei, lineq, lineu, linev]), delimiter='    ',fmt=['%.1f','%.8f','%.8e','%.8e','%.8e','%.8e'])
-    else:
-        with open(path, 'wb') as f:
-            np.savetxt(f, np.transpose([index*np.ones(len(lambdas)), lambdas, linei, lineq, lineu, linev]), delimiter='    ',fmt=['%.1f','%.8f','%.8e','%.8e','%.8e','%.8e'])
+    def run_SIR(self, path, trol, suppress=True):
+        os.chdir(path)
+        if suppress:
+            os.system('echo ' + trol + ' | '+path_to_sir+' >/dev/null 2>&1')
+        else:
+            os.system('echo ' + trol + ' | '+path_to_sir)
 
 def atomic_parameters_file(path, index, ion, wave, E, pot, loggf, transition, alpha, sigma):
     pass
-
-def wavelength_file(profile_path, grid_path, resolution):
-    data = read_existing_profile(profile_path)
-    idxs = np.unique(data[0])
-    L = []
-
-    for idx in idxs:
-        line = data[:,np.where(data[0] == idx)][:, 0, :][1]
-        line = f"{int(idx):<10}:{line[0]:15.4f},{resolution:7.1f},{line[-1]:15.4f}\n"
-        L.append(line)
-
-    with open(grid_path, 'w') as f:
-        f.writelines(L)
 
 def edit_trol_file(path, param, value):
     with open(path, 'r+') as f:
