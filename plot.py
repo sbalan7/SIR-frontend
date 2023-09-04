@@ -20,9 +20,7 @@ def plot_spectra(path, color, fig, axs):
 
     return fig, axs
 
-def add_atmosphere(path, color, fig, axs):
-    atm0, atm1 = np.loadtxt(path, skiprows=0, max_rows=1), np.loadtxt(path, skiprows=1)
-
+def add_atmosphere(atm1, color, fig, axs):
     # Temperature
     axs[0, 0].plot(atm1[:,0], atm1[:,1], color=color, linewidth=1.0)
     axs[0, 0].set(title='Temperature [K]', xlabel='log '+r'$\tau$')

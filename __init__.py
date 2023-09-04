@@ -7,6 +7,102 @@ import os
 
 path_to_sir = '/home/sbalan7/Downloads/Code/Sunspots/SIR/sir2020_04new/sir.x'
 
+class Atmosphere:
+    """
+    Allows for easy creation and modification of the atmosphere. Send this to the 
+    SIR class for running SIR with this instance of the atmosphere.
+    """
+    def __init__(self, path_to_model, path_to_file='modelg.mod', taumin=None, taumax=None):
+        self.atm0, self.atm1 = np.loadtxt(path_to_model, skiprows=0, max_rows=1), np.loadtxt(path_to_model, skiprows=1)
+        
+        self.model = path_to_model
+        self._file = path_to_file
+
+        if taumin is not None:
+            mask = np.where(self.atm1[:, 0] > taumin)
+            self.atm1 = self.atm1[mask]
+
+        if taumax is not None:
+            mask = np.where(self.atm1[:, 0] < taumax)
+            self.atm1 = self.atm1[mask]
+        
+    #def set_atmospheric_parameters(self, temp=None, pres=None, micr=None, magf=None, vlos=None, incl=None, azim=None):
+    def set_atmospheric_parameters(self, input_type=None, **kwargs):
+        """
+        Set atmospheric parameters by setting the type of the input.
+        Accepts 'scalar', 'lineartau', 'linear', 'custom'.
+        'scalar': results in the correspinding value entered for the argument being used as is.
+        'lineartau': needs a tuple (a, b), p = a + b * tau will be used to set the guess atm.
+        'linear': needs a tuple (a, b, c), p = a + b * tau + c * p, the parameter gets a linear 
+        dependence on both tau and itself while also getting shifted by a.
+        'custom': provide the complete variation of the parameter over logtau which will be used.
+        'first': allows for setting the parameters in the first line, as macr for macroturbulent
+        velocity, fill for filling factor, stry for stray light in the kwargs. 
+        For kwargs, use temp for temperature, pres for pressure, micr for 
+        microturbulent velocity, magf for magnetic field, vlos for line
+        of sight velocity, incl for inclination and azim for azimuth
+        """
+
+        if input_type=='first':
+            params = {'macr': 1, 'fill': 2, 'stry': 3}
+
+            vals = [(params[kw], kwargs[kw]) for kw in kwargs]
+            
+            for idx, val in vals:
+                self.atm0[idx] = val
+
+        params = {'temp': 1, 'pres': 2, 'micr': 3, 'magf': 4, 'vlos': 5, 'incl': 6, 'azim': 7}
+        
+        vals = [(params[kw], kwargs[kw]) for kw in kwargs]
+        
+        if input_type=='scalar':
+            for idx, val in vals:
+                self.atm1[:, idx] = val + self.atm1[:, idx] * 0
+
+        if input_type=='lineartau':
+            for idx, val in vals:
+                self.atm1[:, idx] = val[0] + self.atm1[:, 0] * val[1] + val[0]
+        
+        if input_type=='linear':
+            for idx, val in vals:
+                self.atm1[:, idx] = val[0] + self.atm1[:, 0] * val[1] + self.atm1[:, idx] * val[2]
+        
+        if input_type=='custom':
+            for idx, val in vals:
+                self.atm1[:, idx] = val
+    
+    def write_atm(self):
+        with open(self._file, 'wb') as f:
+            np.savetxt(f, self.atm0.reshape(1, 3), delimiter='    ', fmt='%.5f')
+            np.savetxt(f, self.atm1, delimiter='    ', fmt=['%.3f','%.4f','%.6e','%.6e','%.4f','%.4e','%.4f','%.4f','%.6f','%.6e','%.9e'])
+
+    def plot_atmosphere(self, color, fig=None, axs=None):
+        if fig is None:
+            fig, axs = plt.subplots(2, 3, figsize=(10, 6))
+        fig, axs = frontend.plot.add_atmosphere(self.atm1, color, fig, axs)
+        return fig, axs
+
+class Profiles:
+    """
+    For manipulation of the Stokes profiles and their corresponding parameters.
+    """
+    def __init__(self, path_to_obs, path_to_file):
+        [self.indices, self.lambdas, self.linei, self.lineq, self.lineu, self.linev] = np.loadtxt(path_to_obs).T
+
+        self.path_to_obs  = path_to_obs
+        self.path_to_file = path_to_file
+
+    def add_profile(self, profile2):
+        self.indices = np.concatenate(self.indices, profile2.indices)
+        self.lambdas = np.concatenate(self.lambdas, profile2.lambdas)
+
+        self.linei = np.concatenate(self.linei, profile2.linei)
+        self.lineq = np.concatenate(self.lineq, profile2.lineq)
+        self.lineu = np.concatenate(self.lineu, profile2.lineu)
+        self.linev = np.concatenate(self.linev, profile2.linev)
+        
+        
+
 def run_SIR(path, trol, suppress=True):
     os.chdir(path)
     if suppress:

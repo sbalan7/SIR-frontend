@@ -1,6 +1,6 @@
 # GREGOR Data Analysis and SIR Frontend Testing
 
-SIR Frontend v0.01
+SIR Frontend v0.02 - Updated atmosphere, need to fix examples and readme
 
 TODO:
 1. Rewrite the functions into classes for a cleaner and more powerful library
