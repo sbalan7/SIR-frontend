@@ -27,7 +27,7 @@ class Atmosphere:
             self.atm1 = self.atm1[mask]
         
     #def set_atmospheric_parameters(self, temp=None, pres=None, micr=None, magf=None, vlos=None, incl=None, azim=None):
-    def set_atmospheric_parameters(self, input_type=None, **kwargs):
+    def set_atmospheric_parameters(self, method, **kwargs):
         """
         Set atmospheric parameters by setting the type of the input.
         Accepts 'scalar', 'lineartau', 'linear', 'custom'.
@@ -43,7 +43,7 @@ class Atmosphere:
         of sight velocity, incl for inclination and azim for azimuth
         """
 
-        if input_type=='first':
+        if method=='first':
             params = {'macr': 1, 'fill': 2, 'stry': 3}
 
             vals = [(params[kw], kwargs[kw]) for kw in kwargs]
@@ -55,31 +55,33 @@ class Atmosphere:
         
         vals = [(params[kw], kwargs[kw]) for kw in kwargs]
         
-        if input_type=='scalar':
+        if method=='scalar':
             for idx, val in vals:
                 self.atm1[:, idx] = val + self.atm1[:, idx] * 0
 
-        if input_type=='lineartau':
+        if method=='lineartau':
             for idx, val in vals:
-                self.atm1[:, idx] = val[0] + self.atm1[:, 0] * val[1] + val[0]
+                self.atm1[:, idx] = val[0] + self.atm1[:, 0] * val[1]
         
-        if input_type=='linear':
+        if method=='linear':
             for idx, val in vals:
                 self.atm1[:, idx] = val[0] + self.atm1[:, 0] * val[1] + self.atm1[:, idx] * val[2]
         
-        if input_type=='custom':
+        if method=='custom':
             for idx, val in vals:
                 self.atm1[:, idx] = val
     
-    def write_atm(self):
-        with open(self._file, 'wb') as f:
+    def write_atm(self, path=None):
+        if path is None:
+            path = self._file
+        with open(path, 'wb') as f:
             np.savetxt(f, self.atm0.reshape(1, 3), delimiter='    ', fmt='%.5f')
             np.savetxt(f, self.atm1, delimiter='    ', fmt=['%.3f','%.4f','%.6e','%.6e','%.4f','%.4e','%.4f','%.4f','%.6f','%.6e','%.9e'])
 
     def plot_atmosphere(self, fig=None, axs=None, **kwargs):
         if fig is None:
             fig, axs = plt.subplots(2, 3, figsize=(10, 6))
-        fig, axs = frontend.plot.add_atmosphere(self.atm1, fig, axs, **kwargs)
+        fig, axs = plot.add_atmosphere(self.atm1, fig, axs, **kwargs)
         return fig, axs
 
 class Profiles:
@@ -102,8 +104,10 @@ class Profiles:
         self.lineu = np.concatenate(self.lineu, profile2.lineu)
         self.linev = np.concatenate(self.linev, profile2.linev)
     
-    def write_profile(self):
-        with open(self.path_to_file, 'wb') as f:
+    def write_profile(self, path=None):
+        if path is None:
+            path = path_to_file
+        with open(path, 'wb') as f:
             np.savetxt(f, np.transpose([self.indices, self.lambdas, self.linei, self.lineq, self.lineu, self.linev]), delimiter='    ',fmt=['%.1f','%.8f','%.8e','%.8e','%.8e','%.8e'])
     
     def plot_profiles(self, index, fig=None, axs=None, **kwargs):
@@ -111,7 +115,7 @@ class Profiles:
             fig, axs = plt.subplots(2, 2)
         data = [self.indices, self.lambdas, self.linei, self.lineq, self.lineu, self.linev]
         line = data[:,np.where(data[0] == index)][:, 0, :]
-        fig, axs = frontend.plot.plot_spectra(line, fig, axs, **kwargs)
+        fig, axs = plot.plot_spectra(line, fig, axs, **kwargs)
         return fig, axs
     
     def write_wavelength_file(self, resolution, grid_path='malla.grid'):
@@ -129,44 +133,97 @@ class Profiles:
 
         [self.indices, self.lambdas, self.linei, self.lineq, self.lineu, self.linev] = data
         pass
-        
+
 class SIR:
-    def __init__(self, atmosphere, profiles, trol_file, lines_file, **kwargs):
-        # save pwd
-        # find directory of trol file
-        # write atmos, prof, lines, malla in directory
-        # get any trol modifications
-        # run sir upon call (within this call move to trol directory and out of it also)
+    def __init__(self, atmosphere, profiles, trol_file, lines_file, abundances, stray_light=None, psf=None, ncycles=None):
+        self.atm = atmosphere
+        self.prf = profiles
+        self.ncycles = ncycles
 
-        pass
+        self.pwd = os.getcwd()
+        self.run_path, self.trol = os.path.split(trol_file)
+        _, self.abundances = os.path.split(abundances)
+        _, self.lines = os.path.split(lines_file)
+        
+        self.trol_path = os.path.join(self.run_path, self.trol)
+        self.atm_path  = os.path.join(self.run_path, 'modelg.mod')
+        self.prf_path  = os.path.join(self.run_path, 'profiles.per')
+        self.grid_path = os.path.join(self.run_path, 'malla.grid')
 
-    def run_SIR(self, path, trol, suppress=True):
-        os.chdir(path)
+        if not os.path.isfile(lines_file):
+            raise FileNotFoundError('Lines file is not found, place it in the same directory as the trol file')
+
+        if not os.path.isfile(abundances):
+            raise FileNotFoundError('Abundances file is not found, place it in the same directory as the trol file')
+        
+        '''
+        # To be implemented later
+        if stray_light is not None:
+            self.stray_light = 0
+        
+        if psf is not None:
+            self.psf = 0
+        '''
+        
+    def edit_trol_file(self, param, value):
+        with open(self.trol_path, 'r+') as f:
+            L = f.readlines()
+        
+        params = {'ncycles':0, 'profiles':1, 'stray':2, 'psf':3, 'grid':4, 'lines':5, 'abundances':6, 'atmguess1':7, 'atmguess2':8, 'wstoki':9, 'wstokq':10, 
+        'wstoku':11, 'wstokv':12, 'autonode':13, 'tempnodes1':14, 'presnodes1':15, 'micrnodes1':16, 'magfnodes1':17, 'vlosnodes1':18, 'inclnodes1':19, 
+        'azimnodes1':20, 'invmacro1':21, 'tempnodes2':22, 'presnodes2':23, 'micrnodes2':24, 'magfnodes2':25, 'vlosnodes2':26, 'inclnodes2':27, 
+        'azimnodes2':28, 'invmacro2':29, 'invfill':30, 'invstray':31, 'mu':32, 'snr':33, 'contcont':34, 'svdtol':35, 'initdiag':36, 'interpstrat':37, 
+        'gaspres1':38, 'gaspres2':39, 'magpres':40, 'nltedep':41}
+        
+        for (p, v) in zip(param, value):
+            idx = params[p]
+            line = L[idx]
+            L[idx] = line.split(":")[0] + ':' + str(v) + '!' + line.split("!")[1]
+        
+        with open(self.trol_path, 'w') as f:
+            f.writelines(L)
+
+    def run_SIR(self, suppress=True):
+        os.chdir(self.run_path)
         if suppress:
-            os.system('echo ' + trol + ' | '+path_to_sir+' >/dev/null 2>&1')
+            os.system('echo ' + self.trol + ' | '+path_to_sir+' >/dev/null 2>&1')
         else:
-            os.system('echo ' + trol + ' | '+path_to_sir)
+            os.system('echo ' + self.trol + ' | '+path_to_sir)
+        os.chdir(self.pwd)
 
-def atomic_parameters_file(path, index, ion, wave, E, pot, loggf, transition, alpha, sigma):
-    pass
+class Inversion(SIR):
+    def __init__(self, atmosphere, profiles, trol_file, lines_file, abundances, stray_light=None, psf=None, 
+                 ncycles=2, autonode=0, weights=[], nodes1=[], nodes2=[]):
+        '''
+        # Temporarily works only with the normal operation of SIR.
+        # Can not handle two atmospheres and advanced files yet.
+        '''
+        super().__init__(atmosphere, profiles, trol_file, lines_file, abundances, stray_light=stray_light, psf=psf, ncycles=ncycles)
+        self.autonode = autonode
 
-def edit_trol_file(path, param, value):
-    with open(path, 'r+') as f:
-        L = f.readlines()
-    
-    params = {'ncycles':0, 'profiles':1, 'stray':2, 'psf':3, 'grid':4, 'lines':5, 'abundances':6, 'atmguess1':7, 'atmguess2':8, 'wstoki':9, 'wstokq':10, 
-    'wstoku':11, 'wstokv':12, 'autonode':13, 'tempnodes1':14, 'presnodes1':15, 'micrnodes1':16, 'magfnodes1':17, 'vlosnodes1':18, 'inclnodes1':19, 
-    'azimnodes1':20, 'invmacro1':21, 'tempnodes2':22, 'presnodes2':23, 'micrnodes2':24, 'magfnodes2':25, 'vlosnodes2':26, 'inclnodes2':27, 
-    'azimnodes2':28, 'invmacro2':29, 'invfill':30, 'invstray':31, 'mu':32, 'snr':33, 'contcont':34, 'svdtol':35, 'initdiag':36, 'interpstrat':37, 
-    'gaspres1':38, 'gaspres2':39, 'magpres':40, 'nltedep':41}
-    
-    for (p, v) in zip(param, value):
-        idx = params[p]
-        line = L[idx]
-        L[idx] = line.split(":")[0] + ':' + str(v) + '!' + line.split("!")[1]
-    
-    with open(path, 'w') as f:
-        f.writelines(L)
+        if len(weights) == 4:
+            self.weights = weights    
+        else:
+            raise ValueError('Weights is a list of length 4')
+        
+        self.nodes1 = nodes1
+        self.nodes2 = nodes2        
+
+    def run_inversion(self, resolution, suppress=True):
+        self.atm.write_atm(path=self.atm_path)
+        self.prf.write_profile(path=self.prf_path)
+        self.prf.write_wavelength_file(resolution, self.grid_path)
+
+        self.edit_trol_file(['ncycles'], [str(self.ncycles)])
+        self.edit_trol_file(['profiles', 'grid', 'lines', 'abundances', 'atmguess1'], ['profiles.per', 'malla.grid', self.lines, self.abundances, 'modelg.mod'])
+
+        self.edit_trol_file(['wstoki', 'wstokq', 'wstoku', 'wstokv'], [str(w) for w in self.weights])
+
+        self.edit_trol_file(['tempnodes1', 'presnodes1', 'micrnodes1', 'magfnodes1', 'vlosnodes1', 'inclnodes1', 'azimnodes1'], [str(k) for k in self.nodes1])
+        self.edit_trol_file(['tempnodes2', 'presnodes2', 'micrnodes2', 'magfnodes2', 'vlosnodes2', 'inclnodes2', 'azimnodes2'], [str(k) for k in self.nodes2])
+
+        self.run_SIR(suppress)
+
 
 def set_trol_file(path, ncycles, profiles, tempnodes1, presnodes1, micrnodes1, magfnodes1, vlosnodes1, inclnodes1, azimnodes1,
                    stray="", psf="", grid='malla.grid', lines='LINES', abundances='ASPLUND', atmguess1='modelg.mod', atmguess2='',
