@@ -1,5 +1,4 @@
 import matplotlib.pyplot as plt
-from astropy.io import fits
 from frontend import plot
 import numpy as np
 import os
@@ -44,12 +43,14 @@ class Atmosphere:
         """
 
         if method=='first':
-            params = {'macr': 1, 'fill': 2, 'stry': 3}
+            params = {'macr': 0, 'fill': 1, 'stry': 2}
 
             vals = [(params[kw], kwargs[kw]) for kw in kwargs]
             
             for idx, val in vals:
                 self.atm0[idx] = val
+            
+            return
 
         params = {'temp': 1, 'pres': 2, 'micr': 3, 'magf': 4, 'vlos': 5, 'incl': 6, 'azim': 7}
         
@@ -94,9 +95,11 @@ class Profiles:
         self.resolution = None
 
     def modify_index(self, index):
+        # add a modification to edit the index of an existing line if multiple are present
         self.indices = index * np.ones(len(self.indices))
 
-    def add_profile(self, profile2):
+    def add_profile(self, profile2): 
+        # add a check to ensure that the new profile doesnt have a repeated index
         self.indices = np.concatenate((self.indices, profile2.indices))
         self.lambdas = np.concatenate((self.lambdas, profile2.lambdas))
 
@@ -243,9 +246,10 @@ class Inversion(SIR):
         self.edit_trol_file(['tempnodes2', 'presnodes2', 'micrnodes2', 'magfnodes2', 'vlosnodes2', 'inclnodes2', 'azimnodes2'], [str(k) for k in self.nodes2])
 
         self.run_SIR(suppress)
-
-        self.op_profiles = [Profiles(f'modelg_{str(k+1)}.per') for k in range(ncycles)]
-        self.op_atmos = [Atmosphere(f'modelg_{str(k+1)}.mod') for k in range(ncycles)]
+        
+        
+        self.op_profiles = [Profiles(os.path.join(self.run_path, f'modelg_{str(k+1)}.per')) for k in range(self.ncycles)]
+        self.op_atmos = [Atmosphere(os.path.join(self.run_path, f'modelg_{str(k+1)}.mod')) for k in range(self.ncycles)]
 
 
 

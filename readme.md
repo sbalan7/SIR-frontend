@@ -1,13 +1,19 @@
-# GREGOR Data Analysis and SIR Frontend Testing
+# GREGOR Data Analysis and SIR Python Frontend
 
-SIR Frontend v0.03 - Added functionality to Profiles, need to fix readme
+SIR Frontend v0.10 - Minimal Functional Inversion Module Completed
+
+A Python based frontend to support and implement a variety of functions to interface the running of SIR, the FORTRAN based package to invert solar atmospheres. Requires matplotlib, numpy, mplcursors and os. 
 
 TODO:
-1. Rewrite the functions into classes for a cleaner and more powerful library - ongoing.
-2. Add more support to plotting with matplotlib's API properly - done, needs testing.
-3. Add comments and clean up code - WIP
+1. Need to add support for synthesis and response functions 
+2. Need to complete support for lesser used aspects of the inversion process
+3. Need to improve robustness out of user input and capture more errors
+4. Add comments and clean up code
 
-To analyse data from GREGOR, first extract information from the `\level1` fits files using standard IO operations. Once the Stokes parameters are extracted from these files, the `\frontend` package can be used to analyse this information. It is necessary to have this folder in the root directory of where the other code will be run to avoid a `ModuleNotFound` error. A suggestion is to create a different folder within this directory to allow for an easy manipulation of the SIR input and output files.
+
+## Usage
+
+To analyse data from GREGOR, first extract information from the `\level1` fits files using standard IO operations. Once the Stokes parameters are extracted from these files, the `\frontend` package can be used to analyse this information. It is necessary to have this folder in the root directory of where the other code will be run to avoid a `ModuleNotFound` error. A suggestion is to create a different folder within this directory to allow for an easy manipulation of the SIR input and output files. Additionally, before using the package, make sure to edit the variable in the `__init__.py` file to reflect the path to the SIR FORTRAN code on your device.
 
 ```
 .
@@ -27,34 +33,75 @@ To analyse data from GREGOR, first extract information from the `\level1` fits f
 └── analysis.ipynb
 ```
 
-Once the data is loaded from the fits files, a line of interest can be extracted from it using numpy operations. To provide this information to SIR, save this data to a profiles file using the frontend package as `frontend.write_profile(path, index, lambdas, linei, lineq, lineu, linev, add=False)`. `index` is an integer parameter corresponding to the index of the transition as used in the wavelength file or the atomic parameters file. `lambdas` and the four `linex` parameters correspond to the wavelength of the profiles and their Stokes parameters in order. If required, multiple different lines can be written to the same file by setting the `add` parameter to `True`, which will result in the new line getting appended instead of overwritten. Similarly, a profiles file can also be read by using the `frontend.read_existing_profile(path)`. Once the profiles file is written to disk, it can be plotted by using `frontend.plot.plot_spectra(path, color, fig, axs)`. It is possible to overplot multiple profiles as shown below.
+To run an inversion, a guess atmosphere model is required. For this, create an object in the atmosphere class by initializing it with an existing reference atmosphere (examples can be found at the original SIR repository linked [here](https://github.com/BasilioRuiz/SIR-code/tree/master/models)). You can also provide a path to save the resulting atmosphere with the parameter `path_to_file`. Additionally, to restrict the range of $\log{\tau}$ values covered by the atmosphere model, you can set the `taumin` or `taumax` variables to the **LOG TAU** values you want to restrict the model to. Only the rows within these bounds will be used if these parameters are set. Atmospheric parameters can be edited using four methods provided by the `set_atmospheric_parameters` method of the class. A scalar trend sets the provided value constantly for all optical depths and is indicated by using the 'scalar' parameter. To set a linear dependence on log tau, use the 'lineartau' method, the parameter will be set as (val[0] + val[1] * log tau). A linear dependence can be set on log tau and the existing parameter value using the 'linear' method, the parameter will be set as (val[0] + val[1] * log tau * val[2] * param). One can also set a custom dependence on log tau by passing the value set they want to the parameter to have over the domain by using the method 'custom'. To edit the first three parameters on the top of the atmosphere file, use method 'first' and edit them. The atmospheric parameters can be written to a file using the `write_atm` method by passing the file name and the parameters can be plotted by using `plot_atmosphere` method. Refer to the minimal working example below.
 
 ```python
 import matplotlib.pyplot as plt
 import frontend as sir
+import numpy as np
 
-fig, axs = plt.subplots(2, 2)
-fig, axs = sir.plot.plot_spectra('modelg_0.per', 'black', fig, axs)
-fig, axs = sir.plot.plot_spectra('modelg_1.per', 'blue', fig, axs)
-fig, axs = sir.plot.plot_spectra('modelg_2.per', 'red', fig, axs)
+HSRA = sir.Atmosphere('AtmosphereModels/hsra11.mod')
+
+HSRA.set_atmospheric_parameters(method='first', fill=0.8)
+HSRA.set_atmospheric_parameters(method='scalar', incl=60, magf=500, azim=30)
+HSRA.set_atmospheric_parameters(method='lineartau', vlos=[5e5, 200])
+HSRA.set_atmospheric_parameters(method='linear', micr=[1e4, -160, -0.5])
+
+fig, axs = HSRA.plot_atmosphere()
+fig.tight_layout()
+plt.show()
+
+HSRA.write_atm('test.mod')
+```
+
+After preparing the atmosphere files, extract the spectral lines from the level 2 data and save it to a profiles file. Use the Profiles class to read this file. Modify the index of the profiles by using `modify_index(index)` method of the class. To stack together multiple profiles for inverting different lines simultaneously, use the `add_profiles(profile2)` method to add an extra profile. Make sure to select the right index for the new profile before adding it. Just like the atmosphere method, the features of the profiles can be written to a file and plotted by using the `write_profile` and `plot_profiles`. However, the `plot_profiles` method additionally requires the index parameter and it plots the corresponding line alone. Additionally, the wavelength file can be written to the `write_wavelength_file` along with the `resolution` parameter provided to it. Refer to the minimal working example below.
+
+```python
+# Assuming the imports are the same as before
+Si = sir.Profiles('Inversion_Si/SiI_avg_QS.per')
+Ca = sir.Profiles('Inversion_Ca/CaI_avg_QS.per')
+
+joint = Si
+joint.modify_index(1)
+Ca.modify_index(2)
+joint.add_profile(Ca)
+
+fig, axs = joint.plot_profiles(index=1)
+fig.tight_layout()
+plt.show()
+
+fig, axs = joint.plot_profiles(index=2)
+fig.tight_layout()
+plt.show()
+
+joint.write_wavelength_file(resolution=18.3)
+```
+
+To begin the inversion process, first move the lines file and abundances file to the same directory as the trol file. Make sure that the trol file in this directory has the default template for SIR (this requirement will be lifted in future versions of the code). Create an instance of the `Inversion` class and give it the atmosphere and profile objects which have been prepared until now. Additionally, it requires the path to the trol file, lines file and abundances file as well. The number of cycles, weights of Stokes parameters, and nodes for inversion can also be passed as parameters to the constructor, or set by editing the attributes of the class. To run the inversion, simply use `run_inversion` which has a single parameter to optionally suppress the output generated by SIR. A list of size ncycles will get populated with objects of the output profiles and atmospheres, which can be accessed using the `op_profiles` and `op_atmos` attributes. Support to stray light files or PSF files will be added soon.
+
+```python
+trol_file  = 'SIR_TEST/sir.trol'
+lines_file = 'SIR_TEST/LINES'
+abundances = 'SIR_TEST/ASPLUND'
+
+# Corresponds to Stokes I, Q, U, V respectively
+weights = [1, 5, 5, 5]
+# Corresponds to temperature, electron pressure, microturbulence, magnetic field, 
+# LOS velocity, inclination and azimuthal angle respectively
+nodes1  = ['2, 5', '', '1', '1, 2', '1, 2', '1, 2', '1, 2']
+
+I1 = sir.Inversion(atmosphere=HSRA, profiles=joint, trol_file=trol_file, lines_file=lines_file, abundances=abundances, ncycles=2, weights=weights, nodes1=nodes1)
+I1.run_inversion(suppress=False)
+
+fig, axs = I1.op_profiles[0].plot_profiles(1, color='red')
+fig, axs = I1.op_profiles[1].plot_profiles(1, fig, axs, color='blue')
+fig.tight_layout()
+plt.show()
+
+fig, axs = I1.op_atmos[0].plot_atmosphere(color='red')
+fig, axs = I1.op_atmos[1].plot_atmosphere(fig, axs, color='blue')
 fig.tight_layout()
 plt.show()
 ```
-
-The next step is to prepare an inital atmosphere guess for inversions. An atmosphere with constant values can be set by using `frontend.set_const_atm(model, temp=None, pres=None, micr=None, magf=None, vlos=None, incl=None, azim=None)`. For any physical parameter passed to this method, the constant will be set for that parameter across the entire optical depth range. A more complex atmosphere consisting of variation can be set by using `frontend.set_complex_atm(model, macr, fill, strl, logt, temp, pres, micr, magf, vlos, incl, azim)` (this method is a work in progress, will add an option to have a linear stratification and to make editing parameters optional). Much like with the profiles, the atmospheric parameters can be plotted using `frontend.plot.add_atmosphere(path, color, fig, axs)`. However, the shape of subplots would have to be `(2, 3)` this time as the method plots temperature, microturbulent velocity, LOS velocity, magnetic field strength, inclination and azimuth against the logarithm of the optical depth.
-
-The wavelength file will be automatically calculated from the profiles file for all lines in it. Calling `frontend.wavelength_file(profile_path, grid_path, resolution)` will calculate and update the file accordingly. The `frontend.atomic_parameters_file()` method is still a work in progress. 
-
-The control file (trol file) can be written either using this package's `frontend.set_trol_file` method or by writing the text file manually. Each parameter in a trol file can also be edited individually instead of rewriting the whole trol file by using the `frontend.edit_trol_file(path, param, value)` method. A list of parameters and their corresponding values (in another list passed to the same method) can be used to selectively edit only some of the parameters. Do note that even if a single parameter is being edited, it must be passed to the function within a list as so `fronend.edit_trol_file('sir.trol', ['profiles'], ['sample.per'])`. Similarly, multiple parameters can be edited by using `fronend.edit_trol_file('sir.trol', ['ncycles', 'profiles', 'wstoki'], [5, 'sample.per', 10])`. The names of the parameters must be the same as those used in `frontend.set_trol_file`.
-
-```python
-set_trol_file(path, ncycles, profiles, tempnodes1, presnodes1, micrnodes1, magfnodes1, vlosnodes1, inclnodes1, azimnodes1,
-                   stray="", psf="", grid='malla.grid', lines='LINES', abundances='ASPLUND', atmguess1='modelg.mod', atmguess2='',
-                   wstoki=1, wstokq=1, wstoku=1, wstokv=1, autonode="", invmacro1="", invmacro2="", invfill="", invstray="",
-                   tempnodes2="", presnodes2="", micrnodes2="", magfnodes2="", vlosnodes2="", inclnodes2="", azimnodes2="",
-                   mu="", snr="", contcont="", svdtol="", initdiag="", interpstrat="", gaspres1="", gaspres2="", magpres="", nltedep="")
-```
-
-To run SIR, first set the path to SIR on your system in the `__init__.py` file. This is a one time setting which can be edited later if required. Provide the path to the directory containing the all the files required for SIR to run (the trol file and all the files mentioned within the trol file including the atmosphere, profiles, atomic parameters, wavelength, PSF, etc.) followed by the name of the trol file itself to `frontend.run_SIR(path, trol, suppress=True)`. If you want to suppress the output of running SIR, set the `supress` parameter to `True`.
 
 An interactive line plot can be made by using the `frontend.plot.interactive_line_plot(x, y, xlabel, ylabel, plot_color='blue', line_color='#505050', box_color='white', box_alpha=0.8)` method (work in progress, currently only supports individual plots, updating to be compatible with subplots).
