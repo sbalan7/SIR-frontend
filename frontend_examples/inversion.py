@@ -1,35 +1,50 @@
 import matplotlib.pyplot as plt
-from astropy.io import fits
 import frontend as sir
 import numpy as np
-import os
 
 
-# Creates an atmosphere having constant parameters with HSRA as its base
-atm0, atm1 = sir.set_const_atm('xAtmosphereModels/hsra11.mod', micr=1e5, magf=250, vlos=0.5e5, incl=60)
+# Creates an atmosphere having constant parameters with HSRA as its base and plots it
+HSRA = sir.Atmosphere('AtmosphereModels/hsra11.mod')
 
-# Writes the atmosphere to a file and runs SIR for the Si line (assuming all parameters are set)
-sir.write_atm('Inversion_Files_Si/modelg.mod', atm0, atm1)
-sir.run_SIR('Inversion_Files_Si', 'sir.trol')
+HSRA.set_atmospheric_parameters(method='first', fill=0.8)
+HSRA.set_atmospheric_parameters(method='scalar', incl=60, magf=500, azim=30, vlos=5e5)
 
-# Plotting the profiles after the inversion
-fig, axs = plt.subplots(2, 2)
-
-fig, axs = sir.plot.plot_spectra('Inversion_Files_Si/GRIS_SiI_avg_QS.per', 'black', fig, axs)
-fig, axs = sir.plot.plot_spectra('Inversion_Files_Si/modelg_1.per', 'blue', fig, axs)
-fig, axs = sir.plot.plot_spectra('Inversion_Files_Si/modelg_2.per', 'red', fig, axs)
-
-fig.suptitle('Average Quiet Sun Pixel')
+fig, axs = HSRA.plot_atmosphere()
 fig.tight_layout()
 plt.show()
 
-# Plotting the atmospheric parameters after the inversion
-fig, axs = plt.subplots(2, 3, figsize=(10, 6))
+HSRA.write_atm('test.mod')
 
-fig, axs = sir.plot.add_atmosphere('Inversion_Files_Si/modelg.mod', 'black', fig, axs)
-fig, axs = sir.plot.add_atmosphere('Inversion_Files_Si/modelg_1.mod', 'blue', fig, axs)
-fig, axs = sir.plot.add_atmosphere('Inversion_Files_Si/modelg_2.mod', 'red', fig, axs)
+# Creates an object for the Si line, modifies its index, writes the malla.grid file and plots it
+Si = sir.Profiles('Inversion_Si/SiI_avg_QS.per')
+Si.modify_index(1)   # Assuming the Si line is set to 1 in the LINES file
+Si.write_wavelength_file(resolution=18.3)
 
-fig.suptitle('Average Quiet Sun Pixel')
+fig, axs = Si.plot_profiles(index=1)
+fig.tight_layout()
+plt.show()
+
+# Create the requisite files for the inversion and run it
+trol_file  = 'SIR_TEST/sir.trol'
+lines_file = 'SIR_TEST/LINES'
+abundances = 'SIR_TEST/ASPLUND'
+
+# Corresponds to Stokes I, Q, U, V respectively
+weights = [1, 5, 5, 5]
+# Corresponds to temperature, electron pressure, microturbulence, magnetic field, 
+# LOS velocity, inclination and azimuthal angle respectively
+nodes1  = ['2, 5', '', '1', '1, 2', '1, 2', '1, 2', '1, 2']
+
+I1 = sir.Inversion(atmosphere=HSRA, profiles=Si, trol_file=trol_file, lines_file=lines_file, abundances=abundances, ncycles=2, weights=weights, nodes1=nodes1)
+I1.run_inversion(suppress=False)
+
+# Plot and analyse the results
+fig, axs = I1.op_profiles[0].plot_profiles(1, color='red')
+fig, axs = I1.op_profiles[1].plot_profiles(1, fig, axs, color='blue')
+fig.tight_layout()
+plt.show()
+
+fig, axs = I1.op_atmos[0].plot_atmosphere(color='red')
+fig, axs = I1.op_atmos[1].plot_atmosphere(fig, axs, color='blue')
 fig.tight_layout()
 plt.show()

@@ -1,39 +1,65 @@
 import matplotlib.pyplot as plt
-from astropy.io import fits
 import frontend as sir
 import numpy as np
-import os
 
 
-# Creating and writing the atmosphere file based off the hot11 model
-atm0, atm1 = sir.set_const_atm('xAtmosphereModels/hot11.mod')
-sir.write_atm('Joint_Inversion/modelg.mod', atm0, atm1)
+# Creates an atmosphere having constant parameters with HSRA as its base and plots it
+HSRA = sir.Atmosphere('AtmosphereModels/hsra11.mod')
 
-'''
-File manipulation trick for simultaneous inversions, assuming the individual profiles are present
-'''
+HSRA.set_atmospheric_parameters(method='first', fill=0.8)
+HSRA.set_atmospheric_parameters(method='scalar', incl=60, magf=500, azim=30, vlos=5e5)
 
-# First, read the individual profile files
-[_, lambdas1, linei1, lineq1, lineu1, linev1] = sir.read_existing_profile('Inversion_Files_Ca/GRIS_CaI_DP.per')
-[_, lambdas2, linei2, lineq2, lineu2, linev2] = sir.read_existing_profile('Inversion_Files_Si/GRIS_SiI_DP.per')
+fig, axs = HSRA.plot_atmosphere()
+fig.tight_layout()
+plt.show()
 
-# Create a path for the combined profiles and provide a new index for the lines
-# Make sure to set add=True to append instead of overwrite
-path = 'Joint_Inversion/GRIS_CaI_SiI_joint_DP.per'
-sir.write_profile(path, 1, lambdas1, linei1, lineq1, lineu1, linev1, add=False)
-sir.write_profile(path, 2, lambdas1, linei1, lineq1, lineu1, linev1, add=True)
-sir.write_profile(path, 3, lambdas1, linei1, lineq1, lineu1, linev1, add=True)
-sir.write_profile(path, 4, lambdas1, linei1, lineq1, lineu1, linev1, add=True)
-sir.write_profile(path, 5, lambdas2, linei2, lineq2, lineu2, linev2, add=True)
+HSRA.write_atm('test.mod')
 
-# Provide the new profiles file for the wavelength file to get autocalculated.
-sir.wavelength_file(path, 'Joint_Inversion/malla.grid', 18.3)
+# Creates an object for the Si line, modifies its index
+Si = sir.Profiles('Inversion_Si/SiI_avg_QS.per')
+Si.modify_index(1)   # Assuming the Si line is set to 1 in the LINES file
 
-# Example of editing the trol file parameters
-sir.edit_trol_file('Joint_Inversion/sir.trol', ['profiles'], ['GRIS_CaI_SiI_joint_DP.per'])
+# Creates an object for the Ca line, modifies its index
+Ca = sir.Profiles('Inversion_Si/CaI_avg_QS.per')
+Ca.modify_index(2)   # Assuming the Ca line is set to 2 in the LINES file
 
-# Running SIR and reading the obtained model, it can now be plotted
-sir.run_SIR('Joint_Inversion', 'sir.trol')
-[_, l1, i1, q1, u1, v1] = sir.read_existing_profile('Joint_Inversion/modelg_2.per')
+# Create an object for the joint inversion, add the lines to it
+joint = Si
+joint.add_profile(Ca)
 
+# Write the wavelength file for the joint profiles and plot the lines in it
+joint.write_wavelength_file(resolution=18.3)
 
+fig, axs = joint.plot_profiles(index=1)
+fig.tight_layout()
+plt.show()
+
+fig, axs = joint.plot_profiles(index=2)
+fig.tight_layout()
+plt.show()
+
+# The other steps are same as the normal inversion
+# Create the requisite files for the inversion and run it
+trol_file  = 'SIR_TEST/sir.trol'
+lines_file = 'SIR_TEST/LINES'
+abundances = 'SIR_TEST/ASPLUND'
+
+# Corresponds to Stokes I, Q, U, V respectively
+weights = [1, 5, 5, 5]
+# Corresponds to temperature, electron pressure, microturbulence, magnetic field, 
+# LOS velocity, inclination and azimuthal angle respectively
+nodes1  = ['2, 5', '', '1', '1, 2', '1, 2', '1, 2', '1, 2']
+
+I1 = sir.Inversion(atmosphere=HSRA, profiles=joint, trol_file=trol_file, lines_file=lines_file, abundances=abundances, ncycles=2, weights=weights, nodes1=nodes1)
+I1.run_inversion(suppress=False)
+
+# Plot and analyse the results
+fig, axs = I1.op_profiles[0].plot_profiles(1, color='red')
+fig, axs = I1.op_profiles[1].plot_profiles(1, fig, axs, color='blue')
+fig.tight_layout()
+plt.show()
+
+fig, axs = I1.op_atmos[0].plot_atmosphere(color='red')
+fig, axs = I1.op_atmos[1].plot_atmosphere(fig, axs, color='blue')
+fig.tight_layout()
+plt.show()
