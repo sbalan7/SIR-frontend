@@ -91,18 +91,19 @@ class Profiles:
     def __init__(self, path_to_file):
         [self.indices, self.lambdas, self.linei, self.lineq, self.lineu, self.linev] = np.loadtxt(path_to_file).T
         self.path_to_file = path_to_file
+        self.resolution = None
 
     def modify_index(self, index):
         self.indices = index * np.ones(len(self.indices))
 
     def add_profile(self, profile2):
-        self.indices = np.concatenate(self.indices, profile2.indices)
-        self.lambdas = np.concatenate(self.lambdas, profile2.lambdas)
+        self.indices = np.concatenate((self.indices, profile2.indices))
+        self.lambdas = np.concatenate((self.lambdas, profile2.lambdas))
 
-        self.linei = np.concatenate(self.linei, profile2.linei)
-        self.lineq = np.concatenate(self.lineq, profile2.lineq)
-        self.lineu = np.concatenate(self.lineu, profile2.lineu)
-        self.linev = np.concatenate(self.linev, profile2.linev)
+        self.linei = np.concatenate((self.linei, profile2.linei))
+        self.lineq = np.concatenate((self.lineq, profile2.lineq))
+        self.lineu = np.concatenate((self.lineu, profile2.lineu))
+        self.linev = np.concatenate((self.linev, profile2.linev))
     
     def write_profile(self, path=None):
         if path is None:
@@ -113,18 +114,19 @@ class Profiles:
     def plot_profiles(self, index, fig=None, axs=None, **kwargs):
         if fig is None:
             fig, axs = plt.subplots(2, 2)
-        data = [self.indices, self.lambdas, self.linei, self.lineq, self.lineu, self.linev]
-        line = data[:,np.where(data[0] == index)][:, 0, :]
+        data = np.array([self.indices, self.lambdas, self.linei, self.lineq, self.lineu, self.linev])
+        line = data[:,np.where(data[0] == index)[0]]
         fig, axs = plot.plot_spectra(line, fig, axs, **kwargs)
         return fig, axs
     
     def write_wavelength_file(self, resolution, grid_path='malla.grid'):
-        data = [self.indices, self.lambdas, self.linei, self.lineq, self.lineu, self.linev]
+        self.resolution = resolution
+        data = np.array([self.indices, self.lambdas, self.linei, self.lineq, self.lineu, self.linev])
         idxs = np.unique(self.indices)
         L = []
 
         for idx in idxs:
-            line = data[:,np.where(data[0] == idx)][:, 0, :][1]
+            line = data[:,np.where(data[0] == idx)[0]][1]
             line = f"{int(idx):<10}:{line[0]:15.4f},{resolution:7.1f},{line[-1]:15.4f}\n"
             L.append(line)
 
@@ -132,7 +134,6 @@ class Profiles:
             f.writelines(L)
 
         [self.indices, self.lambdas, self.linei, self.lineq, self.lineu, self.linev] = data
-        pass
 
 class SIR:
     def __init__(self, atmosphere, profiles, trol_file, lines_file, abundances, stray_light=None, psf=None, ncycles=None):
@@ -168,7 +169,7 @@ class SIR:
     def edit_trol_file(self, param, value):
         with open(self.trol_path, 'r+') as f:
             L = f.readlines()
-        
+
         params = {'ncycles':0, 'profiles':1, 'stray':2, 'psf':3, 'grid':4, 'lines':5, 'abundances':6, 'atmguess1':7, 'atmguess2':8, 'wstoki':9, 'wstokq':10, 
         'wstoku':11, 'wstokv':12, 'autonode':13, 'tempnodes1':14, 'presnodes1':15, 'micrnodes1':16, 'magfnodes1':17, 'vlosnodes1':18, 'inclnodes1':19, 
         'azimnodes1':20, 'invmacro1':21, 'tempnodes2':22, 'presnodes2':23, 'micrnodes2':24, 'magfnodes2':25, 'vlosnodes2':26, 'inclnodes2':27, 
@@ -178,8 +179,11 @@ class SIR:
         for (p, v) in zip(param, value):
             idx = params[p]
             line = L[idx]
-            L[idx] = line.split(":")[0] + ':' + str(v) + '!' + line.split("!")[1]
-        
+            if '!' in line:
+                L[idx] = line.split(":")[0] + ':' + str(v) + '!' + line.split("!")[1]
+            else:
+                L[idx] = line.split(":")[0] + ':' + str(v) + '\n'
+
         with open(self.trol_path, 'w') as f:
             f.writelines(L)
 
@@ -200,29 +204,49 @@ class Inversion(SIR):
         '''
         super().__init__(atmosphere, profiles, trol_file, lines_file, abundances, stray_light=stray_light, psf=psf, ncycles=ncycles)
         self.autonode = autonode
+        self.op_atmos = None
+        self.op_profiles = None
 
         if len(weights) == 4:
             self.weights = weights    
+        elif len(weights) == 0:
+            self.weights = [1, 1, 1, 1]
+            print('Using default weights of [1, 1, 1, 1]')
         else:
             raise ValueError('Weights is a list of length 4')
         
-        self.nodes1 = nodes1
-        self.nodes2 = nodes2        
-
-    def run_inversion(self, resolution, suppress=True):
+        if len(nodes1) == 7:
+            self.nodes1 = nodes1
+        elif len(nodes1) == 0:
+            self.nodes1 = ['1', '1', '1', '1', '1', '1', '1']
+        else:
+            raise ValueError('Nodes is a list of length 7')
+        
+        if len(nodes2) == 7:
+            self.nodes2 = nodes2
+        elif len(nodes2) == 0:
+            self.nodes2 = ['', '', '', '', '', '', '']
+        else:
+            raise ValueError('Nodes is a list of length 7')
+        
+    def run_inversion(self, suppress=True):
         self.atm.write_atm(path=self.atm_path)
         self.prf.write_profile(path=self.prf_path)
-        self.prf.write_wavelength_file(resolution, self.grid_path)
+        self.prf.write_wavelength_file(self.prf.resolution, self.grid_path)
 
         self.edit_trol_file(['ncycles'], [str(self.ncycles)])
         self.edit_trol_file(['profiles', 'grid', 'lines', 'abundances', 'atmguess1'], ['profiles.per', 'malla.grid', self.lines, self.abundances, 'modelg.mod'])
 
-        self.edit_trol_file(['wstoki', 'wstokq', 'wstoku', 'wstokv'], [str(w) for w in self.weights])
+        self.edit_trol_file(['wstoki', 'wstokq', 'wstoku', 'wstokv'], [str(int(w)) for w in self.weights])
 
         self.edit_trol_file(['tempnodes1', 'presnodes1', 'micrnodes1', 'magfnodes1', 'vlosnodes1', 'inclnodes1', 'azimnodes1'], [str(k) for k in self.nodes1])
         self.edit_trol_file(['tempnodes2', 'presnodes2', 'micrnodes2', 'magfnodes2', 'vlosnodes2', 'inclnodes2', 'azimnodes2'], [str(k) for k in self.nodes2])
 
         self.run_SIR(suppress)
+
+        self.op_profiles = [Profiles(f'modelg_{str(k+1)}.per') for k in range(ncycles)]
+        self.op_atmos = [Atmosphere(f'modelg_{str(k+1)}.mod') for k in range(ncycles)]
+
 
 
 def set_trol_file(path, ncycles, profiles, tempnodes1, presnodes1, micrnodes1, magfnodes1, vlosnodes1, inclnodes1, azimnodes1,
