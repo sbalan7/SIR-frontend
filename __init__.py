@@ -221,7 +221,7 @@ class Inversion(SIR):
         if len(nodes1) == 7:
             self.nodes1 = nodes1
         elif len(nodes1) == 0:
-            self.nodes1 = ['1', '1', '1', '1', '1', '1', '1']
+            self.nodes1 = ['1', '', '1', '1', '1', '1', '1']
         else:
             raise ValueError('Nodes is a list of length 7')
         
